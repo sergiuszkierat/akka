@@ -30,6 +30,8 @@ final class Flow[-In, +Out, +Mat](private[stream] override val module: Module)
 
   override val shape: FlowShape[In, Out] = module.shape.asInstanceOf[FlowShape[In, Out]]
 
+  override def toString: String = s"Flow($shape, $module)"
+
   override type Repr[+O] = Flow[In @uncheckedVariance, O, Mat @uncheckedVariance]
   override type ReprMat[+O, +M] = Flow[In @uncheckedVariance, O, M]
 
@@ -38,7 +40,14 @@ final class Flow[-In, +Out, +Mat](private[stream] override val module: Module)
 
   private[stream] def isIdentity: Boolean = this.module eq GraphStages.Identity.module
 
-  override def via[T, Mat2](flow: Graph[FlowShape[Out, T], Mat2]): Repr[T] = viaMat(flow)(Keep.left)
+  override def via[T, Mat2](flow: Graph[FlowShape[Out, T], Mat2]): Repr[T] =
+    if (this.isIdentity) {
+      import Predef.Map.empty
+      import StreamLayout.{ CompositeModule, Ignore, IgnorableMatValComp, Transform, Atomic }
+      val m = flow.module
+      val mat = if (IgnorableMatValComp(m)) Ignore else Transform(_ => NotUsed, Atomic(m))
+      new Flow(CompositeModule(Set(m), m.shape, empty, empty, mat, Attributes.none))
+    } else viaMat(flow)(Keep.left)
 
   override def viaMat[T, Mat2, Mat3](flow: Graph[FlowShape[Out, T], Mat2])(combine: (Mat, Mat2) ⇒ Mat3): Flow[In, T, Mat3] =
     if (this.isIdentity) {
@@ -90,7 +99,7 @@ final class Flow[-In, +Out, +Mat](private[stream] override val module: Module)
   def toMat[Mat2, Mat3](sink: Graph[SinkShape[Out], Mat2])(combine: (Mat, Mat2) ⇒ Mat3): Sink[In, Mat3] = {
     if (isIdentity)
       Sink.fromGraph(sink.asInstanceOf[Graph[SinkShape[In], Mat2]])
-        .mapMaterializedValue(combine(().asInstanceOf[Mat], _))
+        .mapMaterializedValue(combine(NotUsed.asInstanceOf[Mat], _))
     else {
       val sinkCopy = sink.module.carbonCopy
       new Sink(
@@ -261,8 +270,6 @@ final class Flow[-In, +Out, +Mat](private[stream] override val module: Module)
 
   /** Converts this Scala DSL element to it's Java DSL counterpart. */
   def asJava: javadsl.Flow[In, Out, Mat] = new javadsl.Flow(this)
-
-  override def toString = s"""Flow(${module})"""
 }
 
 object Flow {
@@ -410,23 +417,23 @@ trait FlowOps[+Out, +Mat] {
   def recover[T >: Out](pf: PartialFunction[Throwable, T]): Repr[T] = andThen(Recover(pf))
 
   /**
-    * RecoverWith allows to switch to alternative Source on flow failure. It will stay in effect after
-    * a failure has been recovered so that each time there is a failure it is fed into the `pf` and a new
-    * Source may be materialized.
-    *
-    * Since the underlying failure signal onError arrives out-of-band, it might jump over existing elements.
-    * This stage can recover the failure signal, but not the skipped elements, which will be dropped.
-    *
-    * '''Emits when''' element is available from the upstream or upstream is failed and element is available
-    * from alternative Source
-    *
-    * '''Backpressures when''' downstream backpressures
-    *
-    * '''Completes when''' upstream completes or upstream failed with exception pf can handle
-    *
-    * '''Cancels when''' downstream cancels
-    *
-    */
+   * RecoverWith allows to switch to alternative Source on flow failure. It will stay in effect after
+   * a failure has been recovered so that each time there is a failure it is fed into the `pf` and a new
+   * Source may be materialized.
+   *
+   * Since the underlying failure signal onError arrives out-of-band, it might jump over existing elements.
+   * This stage can recover the failure signal, but not the skipped elements, which will be dropped.
+   *
+   * '''Emits when''' element is available from the upstream or upstream is failed and element is available
+   * from alternative Source
+   *
+   * '''Backpressures when''' downstream backpressures
+   *
+   * '''Completes when''' upstream completes or upstream failed with exception pf can handle
+   *
+   * '''Cancels when''' downstream cancels
+   *
+   */
   def recoverWith[T >: Out](pf: PartialFunction[Throwable, Graph[SourceShape[T], NotUsed]]): Repr[T] =
     via(new RecoverWith(pf))
 
@@ -466,27 +473,27 @@ trait FlowOps[+Out, +Mat] {
   def mapConcat[T](f: Out ⇒ immutable.Iterable[T]): Repr[T] = statefulMapConcat(() => f)
 
   /**
-    * Transform each input element into an `Iterable` of output elements that is
-    * then flattened into the output stream. The transformation is meant to be stateful,
-    * which is enabled by creating the transformation function anew for every materialization —
-    * the returned function will typically close over mutable objects to store state between
-    * invocations. For the stateless variant see [[FlowOps.mapConcat]].
-    *
-    * The returned `Iterable` MUST NOT contain `null` values,
-    * as they are illegal as stream elements - according to the Reactive Streams specification.
-    *
-    * '''Emits when''' the mapping function returns an element or there are still remaining elements
-    * from the previously calculated collection
-    *
-    * '''Backpressures when''' downstream backpressures or there are still remaining elements from the
-    * previously calculated collection
-    *
-    * '''Completes when''' upstream completes and all remaining elements has been emitted
-    *
-    * '''Cancels when''' downstream cancels
-    *
-    * See also [[FlowOps.mapConcat]]
-    */
+   * Transform each input element into an `Iterable` of output elements that is
+   * then flattened into the output stream. The transformation is meant to be stateful,
+   * which is enabled by creating the transformation function anew for every materialization —
+   * the returned function will typically close over mutable objects to store state between
+   * invocations. For the stateless variant see [[FlowOps.mapConcat]].
+   *
+   * The returned `Iterable` MUST NOT contain `null` values,
+   * as they are illegal as stream elements - according to the Reactive Streams specification.
+   *
+   * '''Emits when''' the mapping function returns an element or there are still remaining elements
+   * from the previously calculated collection
+   *
+   * '''Backpressures when''' downstream backpressures or there are still remaining elements from the
+   * previously calculated collection
+   *
+   * '''Completes when''' upstream completes and all remaining elements has been emitted
+   *
+   * '''Cancels when''' downstream cancels
+   *
+   * See also [[FlowOps.mapConcat]]
+   */
   def statefulMapConcat[T](f: () ⇒ Out ⇒ immutable.Iterable[T]): Repr[T] =
     via(new StatefulMapConcat(f))
 

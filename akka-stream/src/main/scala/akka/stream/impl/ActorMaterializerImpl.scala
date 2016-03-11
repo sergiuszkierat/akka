@@ -98,6 +98,7 @@ private[akka] case class ActorMaterializerImpl(system: ActorSystem,
       }
 
       override protected def materializeAtomic(atomic: Module, effectiveAttributes: Attributes, matVal: ju.Map[Module, Any]): Unit = {
+        if (MaterializerSession.Debug) println(s"materializing $atomic")
 
         def newMaterializationContext() =
           new MaterializationContext(ActorMaterializerImpl.this, effectiveAttributes, stageName(effectiveAttributes))

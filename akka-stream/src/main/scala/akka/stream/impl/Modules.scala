@@ -6,7 +6,7 @@ package akka.stream.impl
 import akka.NotUsed
 import akka.actor._
 import akka.stream._
-import akka.stream.impl.StreamLayout.Module
+import akka.stream.impl.StreamLayout.AtomicModule
 import org.reactivestreams._
 
 import scala.annotation.unchecked.uncheckedVariance
@@ -15,20 +15,21 @@ import scala.concurrent.Promise
 /**
  * INTERNAL API
  */
-private[akka] abstract class SourceModule[+Out, +Mat](val shape: SourceShape[Out]) extends Module {
+private[akka] abstract class SourceModule[+Out, +Mat](val shape: SourceShape[Out]) extends AtomicModule {
+
+  protected def label: String
+  final override def toString: String = f"$label [${System.identityHashCode(this)}%08x]"
 
   def create(context: MaterializationContext): (Publisher[Out] @uncheckedVariance, Mat)
 
-  override def replaceShape(s: Shape): Module =
+  override def replaceShape(s: Shape): AtomicModule =
     if (s != shape) throw new UnsupportedOperationException("cannot replace the shape of a Source, you need to wrap it in a Graph for that")
     else this
 
   // This is okay since the only caller of this method is right below.
   protected def newInstance(shape: SourceShape[Out] @uncheckedVariance): SourceModule[Out, Mat]
 
-  override def carbonCopy: Module = newInstance(SourceShape(shape.out.carbonCopy()))
-
-  override def subModules: Set[Module] = Set.empty
+  override def carbonCopy: AtomicModule = newInstance(SourceShape(shape.out.carbonCopy()))
 
   protected def amendShape(attr: Attributes): SourceShape[Out] = {
     val thisN = attributes.nameOrDefault(null)
@@ -46,13 +47,15 @@ private[akka] abstract class SourceModule[+Out, +Mat](val shape: SourceShape[Out
  */
 private[akka] final class SubscriberSource[Out](val attributes: Attributes, shape: SourceShape[Out]) extends SourceModule[Out, Subscriber[Out]](shape) {
 
+  override protected def label: String = "SubscriberSource"
+
   override def create(context: MaterializationContext): (Publisher[Out], Subscriber[Out]) = {
     val processor = new VirtualProcessor[Out]
     (processor, processor)
   }
 
   override protected def newInstance(shape: SourceShape[Out]): SourceModule[Out, Subscriber[Out]] = new SubscriberSource[Out](attributes, shape)
-  override def withAttributes(attr: Attributes): Module = new SubscriberSource[Out](attr, amendShape(attr))
+  override def withAttributes(attr: Attributes): AtomicModule = new SubscriberSource[Out](attr, amendShape(attr))
 }
 
 /**
@@ -63,22 +66,27 @@ private[akka] final class SubscriberSource[Out](val attributes: Attributes, shap
  * back-pressure upstream.
  */
 private[akka] final class PublisherSource[Out](p: Publisher[Out], val attributes: Attributes, shape: SourceShape[Out]) extends SourceModule[Out, NotUsed](shape) {
+
+  override protected def label: String = s"PublisherSource($p)"
+
   override def create(context: MaterializationContext) = (p, NotUsed)
 
   override protected def newInstance(shape: SourceShape[Out]): SourceModule[Out, NotUsed] = new PublisherSource[Out](p, attributes, shape)
-  override def withAttributes(attr: Attributes): Module = new PublisherSource[Out](p, attr, amendShape(attr))
+  override def withAttributes(attr: Attributes): AtomicModule = new PublisherSource[Out](p, attr, amendShape(attr))
 }
 
 /**
  * INTERNAL API
  */
 private[akka] final class MaybeSource[Out](val attributes: Attributes, shape: SourceShape[Out]) extends SourceModule[Out, Promise[Option[Out]]](shape) {
+  override protected def label: String = "MaybeSource"
+
   override def create(context: MaterializationContext) = {
     val p = Promise[Option[Out]]()
     new MaybePublisher[Out](p, attributes.nameOrDefault("MaybeSource"))(context.materializer.executionContext) → p
   }
   override protected def newInstance(shape: SourceShape[Out]): SourceModule[Out, Promise[Option[Out]]] = new MaybeSource[Out](attributes, shape)
-  override def withAttributes(attr: Attributes): Module = new MaybeSource(attr, amendShape(attr))
+  override def withAttributes(attr: Attributes): AtomicModule = new MaybeSource(attr, amendShape(attr))
 }
 
 /**
@@ -88,6 +96,8 @@ private[akka] final class MaybeSource[Out](val attributes: Attributes, shape: So
  */
 private[akka] final class ActorPublisherSource[Out](props: Props, val attributes: Attributes, shape: SourceShape[Out]) extends SourceModule[Out, ActorRef](shape) {
 
+  override protected def label: String = "ActorPublisherSource"
+
   override def create(context: MaterializationContext) = {
     val publisherRef = ActorMaterializer.downcast(context.materializer).actorOf(context, props)
     (akka.stream.actor.ActorPublisher[Out](publisherRef), publisherRef)
@@ -95,7 +105,7 @@ private[akka] final class ActorPublisherSource[Out](props: Props, val attributes
 
   override protected def newInstance(shape: SourceShape[Out]): SourceModule[Out, ActorRef] =
     new ActorPublisherSource[Out](props, attributes, shape)
-  override def withAttributes(attr: Attributes): Module = new ActorPublisherSource(props, attr, amendShape(attr))
+  override def withAttributes(attr: Attributes): AtomicModule = new ActorPublisherSource(props, attr, amendShape(attr))
 }
 
 /**
@@ -105,6 +115,8 @@ private[akka] final class ActorRefSource[Out](
   bufferSize: Int, overflowStrategy: OverflowStrategy, val attributes: Attributes, shape: SourceShape[Out])
   extends SourceModule[Out, ActorRef](shape) {
 
+  override protected def label: String = s"ActorRefSource($bufferSize, $overflowStrategy)"
+
   override def create(context: MaterializationContext) = {
     val mat = ActorMaterializer.downcast(context.materializer)
     val ref = mat.actorOf(context, ActorRefSourceActor.props(bufferSize, overflowStrategy, mat.settings))
@@ -113,6 +125,6 @@ private[akka] final class ActorRefSource[Out](
 
   override protected def newInstance(shape: SourceShape[Out]): SourceModule[Out, ActorRef] =
     new ActorRefSource[Out](bufferSize, overflowStrategy, attributes, shape)
-  override def withAttributes(attr: Attributes): Module =
+  override def withAttributes(attr: Attributes): AtomicModule =
     new ActorRefSource(bufferSize, overflowStrategy, attr, amendShape(attr))
 }

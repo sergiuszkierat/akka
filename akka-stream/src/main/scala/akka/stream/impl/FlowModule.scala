@@ -9,7 +9,7 @@ import akka.stream.impl.StreamLayout.Module
 /**
  * INTERNAL API
  */
-private[stream] trait FlowModule[In, Out, Mat] extends StreamLayout.Module {
+private[stream] trait FlowModule[In, Out, Mat] extends StreamLayout.AtomicModule {
   override def replaceShape(s: Shape) =
     if (s != shape) throw new UnsupportedOperationException("cannot replace the shape of a FlowModule")
     else this
@@ -18,6 +18,6 @@ private[stream] trait FlowModule[In, Out, Mat] extends StreamLayout.Module {
   val outPort = Outlet[Out]("Flow.out")
   override val shape = new FlowShape(inPort, outPort)
 
-  override def subModules: Set[Module] = Set.empty
+  protected def label: String
+  final override def toString: String = f"$label [${System.identityHashCode(this)}%08x]"
 }
-

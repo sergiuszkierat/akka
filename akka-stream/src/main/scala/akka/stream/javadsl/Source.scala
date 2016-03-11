@@ -323,6 +323,8 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
 
   private[stream] def module: StreamLayout.Module = delegate.module
 
+  override def toString: String = delegate.toString
+
   /** Converts this Java DSL element to its Scala DSL counterpart. */
   def asScala: scaladsl.Source[Out, Mat] = delegate
 

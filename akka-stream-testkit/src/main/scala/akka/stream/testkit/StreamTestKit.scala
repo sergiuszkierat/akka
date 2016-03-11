@@ -660,6 +660,7 @@ private[testkit] object StreamTestKit {
     }
     override protected def newInstance(shape: SourceShape[T]): SourceModule[T, TestPublisher.Probe[T]] = new ProbeSource[T](attributes, shape)
     override def withAttributes(attr: Attributes): Module = new ProbeSource[T](attr, amendShape(attr))
+    override protected def label: String = "ProbeSource"
   }
 
   final class ProbeSink[T](val attributes: Attributes, shape: SinkShape[T])(implicit system: ActorSystem) extends SinkModule[T, TestSubscriber.Probe[T]](shape) {
@@ -669,6 +670,7 @@ private[testkit] object StreamTestKit {
     }
     override protected def newInstance(shape: SinkShape[T]): SinkModule[T, TestSubscriber.Probe[T]] = new ProbeSink[T](attributes, shape)
     override def withAttributes(attr: Attributes): Module = new ProbeSink[T](attr, amendShape(attr))
+    override protected def label: String = "ProbeSink"
   }
 
 }

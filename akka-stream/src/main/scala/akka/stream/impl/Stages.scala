@@ -208,9 +208,11 @@ private[stream] object Stages {
 
   final case class GroupBy(maxSubstreams: Int, f: Any ⇒ Any, attributes: Attributes = groupBy) extends StageModule {
     override def withAttributes(attributes: Attributes) = copy(attributes = attributes)
+    override protected def label: String = s"GroupBy($maxSubstreams)"
   }
 
   final case class DirectProcessor(p: () ⇒ (Processor[Any, Any], Any), attributes: Attributes = processor) extends StageModule {
     override def withAttributes(attributes: Attributes) = copy(attributes = attributes)
+    override protected def label: String = "DirectProcessor"
   }
 }

@@ -34,6 +34,8 @@ object AttributesSpec {
 
     override def withAttributes(attr: Attributes): Module =
       new AttributesSink(attr, amendShape(attr))
+
+    override protected def label: String = "AttributesSink"
   }
 
 }
